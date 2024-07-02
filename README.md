@@ -5,7 +5,7 @@
 * 장소 : 게더
 * 휴가 : 스터디 진행 기간 중 최대 2일
 
-<img src="https://image.yes24.com/goods/61254539/XL" width = 300 height = 400>
+<img src="https://github.com/Deep-Dive-Study/sql-tuning/assets/99165624/2452bcd6-4b89-43af-9f6d-10e0d915782f" width = 300 height = 400>
 
 ## 🚩 목표
 SQL 튜닝을 이해하고, 데이터베이스의 동작 원리와 성능을 최적화하는 방법을 습득합니다. 이 과정을 통해 SQLP 자격증 취득을 목표로 합니다.
