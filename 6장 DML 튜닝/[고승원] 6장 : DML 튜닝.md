@@ -250,3 +250,93 @@ Unique한 1쪽 집합과 조인되는 테이블이어야 식별 가능하다.
 - 이미 저장된 데이터를 조건에 따라 지울 수 있다.
 
 MERGE문은 데이터가 존재하면 UPDATE 없으면 INSERT할 때 SQL 수를 한 번만 날리도록 고정한다.
+
+
+# 6.2 Direct Path I/O 활용
+
+버퍼캐시를 경유하지 않고 곧바로 데이터 블록을 쓸 수 있는 기능을 뜻한다.
+
+## 6.2.1 Direct Path I/O
+
+일반적인 DB
+
+- 데이터 변경이 일어날 때 버퍼캐시에서 찾고, 변경을 가한다.
+- DBWR 프로세스가 블록을 찾아 데이터파일에 반영한다.
+
+대량 데이터를 수정할 때 버퍼캐시는 쓸모가 없다. → Direct Path I/O
+
+Direct Path I/O 작동 조건
+
+- 병렬 쿼리로 Full Scan
+- 병렬 DML 수행
+- Direct Path Insert 수행
+- Temp 세그먼트 블록 I/O
+- direct 옵션 지정 + export 수행
+- nocache 옵션으로 지정한 LOB 컬럼 조회
+
+## 6.2.2 Direct Path INSERT
+
+INSERT가 느린 이유
+
+- 데이터 블록중 Freelist를 찾는다. (공간있는 블록)
+- Freelist에서 할당받은 블록을 버퍼캐시에서 찾는다.
+    - 없으면 데이터파일에서 버퍼캐시로 적재
+- INSERT 내용을 Undo 세그먼트에 기록한다.
+- INSERT 내용을 Redo 로그에 기록한다.
+
+Direct Path INSERT 사용법
+
+- INSERT … SELECT 문에 append 힌트 사용
+- INSERT 문에 parallel 힌트를 사용
+- direct 옵션 지정 + sqlldr로 적재
+- CTAS문 수행
+
+Direct Path INSERT가 빠른 이유
+
+- Freelist 참조 안함
+- 데이터 순차적 입력
+- 버퍼캐시 탐색 안함
+- 데이터파일에 직접 기록
+- Undo 로깅 생략
+- Redo 로깅 생략 가능
+
+Array Processing을 Direct Path INSERT 하는 방법
+
+- append_values 힌트 사용
+
+**Direct Path INSERT 주의점**
+
+- Exclusive TM Lock이 걸린다. (해당 테이블에 다른 DML 수행 불가)
+- 테이블 여유 공간을 재활용하지 못한다. (Reorg 작업 수행 필수)
+
+## 6.2.3 병렬 DML
+
+INSERT는 Direct Path가 가능하다.
+
+UPDATE, DELETE는 Direct Path가 안된다.
+
+빠르게 처리하는 방법은 병렬처리뿐이다.
+
+오라클은 병렬 DML에 항상 Direct Path를 적용한다.
+
+병렬 DML은 항상 TM Lock이 발생한다.
+
+병렬 DML 활성화 방법
+
+```jsx
+alter session enable parallel dml;
+```
+
+병렬 DML 사용 방법
+
+```jsx
+insert /*+ parallel(c 4) */ into 테이블 c
+select /*+ full(o) parallel(o 4) */ * from 테이블2 o;
+```
+
+병렬 DML을 활성화하지 않으면 병목이 생긴다.
+
+**병렬 DML 확인하는 방법**
+
+![image](https://github.com/user-attachments/assets/37b245c6-e38e-49f7-9fb4-62bbffae8b20)
+
