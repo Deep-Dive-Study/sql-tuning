@@ -340,3 +340,198 @@ select /*+ full(o) parallel(o 4) */ * from 테이블2 o;
 
 ![image](https://github.com/user-attachments/assets/37b245c6-e38e-49f7-9fb4-62bbffae8b20)
 
+# 6.3 파티션을 활용한 DML 튜닝
+
+## 6.3.1 테이블 파티션
+
+파티셔닝 : 테이블 또는 인덱스 데이터를 특정 컬럼값에 따라 별도 세그먼트에 나눠서 저장하는 것
+
+- 관리적 장점 : 가용성 향상 (백업하는 단위의 세분화)
+- 성능적 장점 : 부하분산
+
+### Range 파티션
+
+```sql
+create table 주문 ( 주문번호 number, 주문일자 varchar2(8), ...)
+partition by range(주문일자) (
+ partition P2017_Q1 values less than ('20170401')
+, partition P2017_02 values less than ('20170701') 
+, partition P2017_Q3 values less than ('20171001')
+, partition P2017_04 values less than ('20180101')
+, partition P2018_Q1 values less than ('20180401')
+, partition P9999_W values less than ( MAXVALUE ) -- 주문일자 〉='20180401'
+);
+```
+
+다음과 같이 특정 컬럼을 기준으로 파티셔닝을 한다.
+
+- 검색 조건에 맞는 파티션만 골라 읽어 조회 성능 향상 (Pruning)
+- 특정 컬럼을 기준으로 데이터가 몰려있음
+
+### 해시 파티션
+
+```sql
+create table 고객 (고객ID varchar2(5), ... )
+partition by hash(고객ID) partitions 4;
+```
+
+파티션 키 값을 해시함수에 입력해 반환받은 값을 세그먼트에 저장
+
+- 변별력이 좋고 데이터 분포가 고른 컬럼을 키로 선정해야 효과적이다.
+- 파티션 분포가 고르다.
+
+### 리스트 파티션
+
+```sql
+create table 인터넷매물 ( 물건코드 varchar2(5), 지역분류 Varchar2(4), ...)
+partition by list(지역분류) (
+ partition P_지역1 values ('서울')
+, partition P_지역2 values ('경기', '인천') 
+, partition P_지역3 values ('부산', '대구', '대전', '광주')
+, partition P_ values (DEFAULT) -- 기타 지역
+) ;
+```
+
+사용자가 정의한 그루핑 기준에 따라 데이터를 분할 저장하는 방식
+
+- Range 파티션과 다르게 순서와 상관없이 저장된다.
+
+## 6.3.2 인덱스 파티션
+
+테이블
+
+- 비파티션
+- 파티션
+
+인덱스
+
+- 로컬 파티션
+- 글로벌 파티션
+- 비파티션
+
+![image](https://github.com/user-attachments/assets/a02ac6b8-2bb7-4af9-96b5-450755e4f178)
+
+### 로컬 파티션 인덱스
+
+```sql
+create index 이름 on 테이블 (컬럼) LOCAL;
+```
+
+- 인덱스를 생성할 때 LOCAL 옵션을 추가하면 테이블 파티션 속성을 상속받는다.
+- 오라클이 1:1 대응 관계를 갖도록 관리해서 테이블 구성이 변경되어도 인덱스 재생성의 필요가 없다.
+
+### 글로벌 파티션 인덱스
+
+```sql
+create index 이름 on 테이블 (컬럼) GLOBAL
+partition by range (컬럼) (
+	partition 이름 values less than (~)
+, partition 이름 values less than (MAXVALUE)
+);
+```
+
+- 인덱스를 생성할 때 GLOBAL 옵션을 추가하면 파티션 정의를 할 수 있다.
+- 테이블 파티션 구성을 변경할 때 Unusable 상태로 바뀌므로 인덱스를 재생성 해줘야된다.
+
+### 비파티션 인덱스
+
+```sql
+create index 이름 on 테이블 (컬럼);
+```
+
+- 그냥 일반적인 인덱스이다.
+- 테이블 파티션 구성을 변경할 때 Unusable 상태로 바뀌므로 인덱스를 재생성 해줘야된다.
+
+### Prefixed VS Nonprefixed
+
+- Prefixed : 인덱스 파티션 키 컬럼이 인덱스 키 컬럼 왼쪽 선두에 위치한다.
+- Nonprefixed : 인덱스 파티션 키 컬럼이 인덱스 키 컬럼 왼쪽 선두에 없거나, 파티션 키가 인덱스 컬럼에 속하지 않을때
+
+인덱스 유형
+
+- 로컬 Prefixed 파티션 인덱스
+- 로컬 Noneprefixed 파티션 인덱스
+- 글로벌 Prefixed 파티션 인덱스
+- 비파티현 인덱스
+
+### 중요한 인덱스 파티션 제약
+
+“Unique 인덱스를 파티셔닝 하려면 파티션 키가 모두 인덱스 구성 컬럼이어야 한다”
+
+그렇지 않게되면 생기는 불상사
+
+- 새로운 레코드를 입력할 때 파티션 전체를 탐색한다.
+- 다른 파티션에 입력을 막기 위해 Lock 매커니즘이 필요하다.
+- 위와 같은 이유로 파티션 구조 변경 작업이 어려워 진다.
+    - 서비스 중단 없이 변경이 불가해진다.
+
+가급적 인덱스를 로컬파티션으로 구성하자..
+
+## 6.3.3 파티션을 활용한 대량 UPDATE 튜닝
+
+대용량 인덱스에 대한 손익분기점은 5% 정도이다. 손익분기점을 넘는다면 인덱스 없이 작업 후 재생성하는게 빠르다.
+
+### 파티션 Exchange를 이용한 대량 데이터 변경
+
+임시 세그먼트를 만들어 원본 파티션과 바꿔치기 한다.
+
+1. 임시 테이블을 생성한다. (nologging모드 적극 활용)
+2. 임시 테이블에 입력하며 수정한다.
+3. 임시 테이블에 원본 테이블과 같은 인덱스를 생성한다. (nologging모드 적극 활용)
+4. 기존 파티션과 임시 테이블을 Exchange 한다.
+5. 임시 테이블을 Drop 한다.
+6. 파티션을 Logging 모드로 재변경한다.
+
+## 6.3.4 파티션을 활용한 대량 Delete 튜닝
+
+Delete 연산 역시 Delete 연산에도 부하를 가한다. (Delete는 모든 인덱스에 영향)
+
+초 대용량 테이블의 경우 인덱스를 전부 삭제하고 재생성 하는데도 시간이 적잖이 소요된다.
+
+**Delete가 부하가 큰 이유**
+
+- 레코드 삭제
+- 레코드 삭제에 대한 Undo Log
+- 레코드 삭제에 대한 Redo Log
+- 인덱스 레코드 삭제
+- 인덱스 레코드 삭제에 대한 Undo Log
+- 인덱스 레코드 삭제에 대한 Redo Log
+- Undo Log에 대한 Redo Log
+
+**사용해볼 수 있는 방법**
+
+- 파티션 Drop을 이용한 대량 데이터 삭제 : 로컬의 경우 삭제가 쉬움
+- 파티션 Truncate를 이용햔 대량 데이터 삭제
+    - 임시 테이블을 생성하고 남길 데이터만 복제
+    - 삭제 대상 테이블 파티션 Truncate
+    - 대상 파티션 지정
+    - 임시 테이블에 복제해 둔 데이터 원본 테이블에 입력
+    - 임시 테이블 Drop
+
+**무중단 Drop 또는 Truncate 조건**
+
+- 파티션 키와 커팅 기준 일치
+- 파티션 단위와 커팅 주기 일치
+- 모든 인덱스가 로컬 파티션 인덱스
+
+## 6.3.5 파티션을 활용한 대량 Insert 튜닝
+
+### 비파티션 테이블
+
+- 테이블 nologging 모드로 전환
+- 손익분기점을 넘는 경우 인덱스를 Unusable 전환
+- 데이터 입력
+- 인덱스 재생성
+- loggin 모드로 재전환
+
+### **파티션 테이블**
+
+초대용량의 경우 인덱스 재생성 비용이 크기 때문에 인덱스를 건들지 않는다.
+
+다만, 파티션이 되어 있는 경우 파티션 단위로 인덱스를 제어할 수 있다.
+
+- 테이블 nologging 모드로 전환
+- 파티션 인덱스를 Unusable 전환
+- 데이터 입력 (Direct Path Insert 방식 장려)
+- 파티션 인덱스 재생성
+- loggin 모드로 재전환
